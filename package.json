@@ -1,0 +1,22 @@
+{
+  "name": "juntos-ios",
+  "version": "1.0.0",
+  "private": true,
+  "main": "index.js",
+  "scripts": {
+    "start": "expo start",
+    "ios": "expo run:ios",
+    "iconos": "node scripts/iconos.js"
+  },
+  "dependencies": {
+    "expo": "^57.0.0",
+    "expo-asset": "~57.0.21",
+    "expo-audio": "~57.0.5",
+    "expo-constants": "~57.0.24",
+    "expo-splash-screen": "~57.0.11",
+    "expo-status-bar": "~57.0.1",
+    "react": "19.2.3",
+    "react-native": "0.86.3",
+    "react-native-webview": "13.16.1"
+  }
+}

@@ -1,0 +1,153 @@
+# Juntos para iPhone: compila en una Mac de GitHub y sube a TestFlight, sin servicios de terceros.
+# Secretos del repositorio (ninguno está en el código):
+#   JUNTOS_P12_BASE64, JUNTOS_P12_PASSWORD  certificado de distribución
+#   JUNTOS_PROFILE_BASE64                   perfil de App Store
+#   ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_P8   llave de App Store Connect (solo para subir)
+#
+#   [compilar]   compila firmado y sube a TestFlight
+#   [simulador]  abre la app en un iPhone Pro Max simulado con un "líder" automático y guarda capturas
+#
+#   git commit --allow-empty -m "Compilar [compilar]" && git push
+name: Juntos iOS
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: juntos-ios
+  cancel-in-progress: false
+
+jobs:
+  compilar:
+    if: contains(github.event.head_commit.message, '[compilar]')
+    runs-on: macos-26
+    timeout-minutes: 80
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Instalar dependencias
+        run: npm ci
+      - name: Número de compilación (único por ejecución)
+        run: node -e 'const fs=require("fs");const a=JSON.parse(fs.readFileSync("app.json","utf8"));a.expo.ios.buildNumber=String(100+Number(process.env.GITHUB_RUN_NUMBER));fs.writeFileSync("app.json",JSON.stringify(a,null,2));console.log("versión",a.expo.version,"compilación",a.expo.ios.buildNumber)'
+      - name: Generar proyecto nativo
+        run: npx expo prebuild --platform ios --non-interactive
+      - name: Certificado y perfil (llavero temporal de esta Mac)
+        env:
+          JUNTOS_P12_BASE64: ${{ secrets.JUNTOS_P12_BASE64 }}
+          JUNTOS_P12_PASSWORD: ${{ secrets.JUNTOS_P12_PASSWORD }}
+          JUNTOS_PROFILE_BASE64: ${{ secrets.JUNTOS_PROFILE_BASE64 }}
+        run: |
+          if [ -z "$JUNTOS_P12_BASE64" ] || [ -z "$JUNTOS_P12_PASSWORD" ] || [ -z "$JUNTOS_PROFILE_BASE64" ]; then echo "Faltan los secretos de firma"; exit 1; fi
+          printf "%s" "$JUNTOS_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/dist.p12"
+          printf "%s" "$JUNTOS_PROFILE_BASE64" | base64 --decode > "$RUNNER_TEMP/perfil.mobileprovision"
+          KC="$RUNNER_TEMP/firma.keychain-db"; KP=$(uuidgen)
+          security create-keychain -p "$KP" "$KC"
+          security set-keychain-settings -lut 21600 "$KC"
+          security unlock-keychain -p "$KP" "$KC"
+          security import "$RUNNER_TEMP/dist.p12" -P "$JUNTOS_P12_PASSWORD" -A -t cert -f pkcs12 -k "$KC" > /dev/null
+          security set-key-partition-list -S apple-tool:,apple: -k "$KP" "$KC" > /dev/null
+          security list-keychain -d user -s "$KC"
+          security cms -D -i "$RUNNER_TEMP/perfil.mobileprovision" > "$RUNNER_TEMP/perfil.plist"
+          UUID=$(/usr/libexec/PlistBuddy -c "Print :UUID" "$RUNNER_TEMP/perfil.plist")
+          NOMBRE=$(/usr/libexec/PlistBuddy -c "Print :Name" "$RUNNER_TEMP/perfil.plist")
+          EQUIPO=$(/usr/libexec/PlistBuddy -c "Print :TeamIdentifier:0" "$RUNNER_TEMP/perfil.plist")
+          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles ~/Library/Developer/Xcode/UserData/Provisioning\ Profiles
+          cp "$RUNNER_TEMP/perfil.mobileprovision" ~/Library/MobileDevice/Provisioning\ Profiles/$UUID.mobileprovision
+          cp "$RUNNER_TEMP/perfil.mobileprovision" ~/Library/Developer/Xcode/UserData/Provisioning\ Profiles/$UUID.mobileprovision
+          echo "PERFIL_NOMBRE=$NOMBRE" >> "$GITHUB_ENV"; echo "EQUIPO=$EQUIPO" >> "$GITHUB_ENV"
+          rm -f "$RUNNER_TEMP/dist.p12"
+      - name: Firma manual solo para la app (no para las bibliotecas)
+        run: node scripts/firma.js "$PERFIL_NOMBRE" "$EQUIPO"
+      - name: Compilar (archivo de Xcode)
+        run: |
+          WS=$(ls -d ios/*.xcworkspace | head -1); SCHEME=$(basename "$WS" .xcworkspace)
+          set -o pipefail
+          xcodebuild -workspace "$WS" -scheme "$SCHEME" -configuration Release -sdk iphoneos \
+            -destination 'generic/platform=iOS' -archivePath "$RUNNER_TEMP/Juntos.xcarchive" archive 2>&1 | tee "$RUNNER_TEMP/xcodebuild.log" | grep -E "error:|warning: (unable|The iOS)|ARCHIVE (SUCCEEDED|FAILED)|Signing Identity|Provisioning Profile" || true
+          test -d "$RUNNER_TEMP/Juntos.xcarchive" || { tail -60 "$RUNNER_TEMP/xcodebuild.log"; exit 1; }
+      - name: Exportar el .ipa
+        run: |
+          cat > "$RUNNER_TEMP/exportar.plist" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>teamID</key><string>$EQUIPO</string>
+            <key>signingStyle</key><string>manual</string>
+            <key>signingCertificate</key><string>Apple Distribution</string>
+            <key>provisioningProfiles</key><dict><key>com.appr.juntos</key><string>$PERFIL_NOMBRE</string></dict>
+            <key>uploadSymbols</key><false/>
+            <key>destination</key><string>export</string>
+          </dict></plist>
+          EOF
+          xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/Juntos.xcarchive" -exportOptionsPlist "$RUNNER_TEMP/exportar.plist" -exportPath "$RUNNER_TEMP/salida" 2>&1 | tail -15
+          ls -la "$RUNNER_TEMP/salida"; cp "$RUNNER_TEMP"/salida/*.ipa "$RUNNER_TEMP/Juntos.ipa"
+      - name: Subir a TestFlight
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+        run: |
+          KEY_ID=$(printf '%s' "$ASC_KEY_ID" | tr -d '[:space:]'); ISSUER=$(printf '%s' "$ASC_ISSUER_ID" | tr -d '[:space:]')
+          mkdir -p ~/.appstoreconnect/private_keys
+          printf '%s\n' "$ASC_KEY_P8" > ~/.appstoreconnect/private_keys/AuthKey_${KEY_ID}.p8
+          xcrun altool --upload-app -f "$RUNNER_TEMP/Juntos.ipa" -t ios --apiKey "$KEY_ID" --apiIssuer "$ISSUER"
+      - name: Borrar llaves de esta Mac
+        if: always()
+        run: |
+          security delete-keychain "$RUNNER_TEMP/firma.keychain-db" || true
+          rm -rf ~/.appstoreconnect "$RUNNER_TEMP/perfil.mobileprovision" "$RUNNER_TEMP/perfil.plist"
+
+  simulador:
+    if: contains(github.event.head_commit.message, '[simulador]')
+    runs-on: macos-26
+    timeout-minutes: 70
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Instalar dependencias
+        run: npm ci
+      - name: Generar proyecto nativo
+        run: npx expo prebuild --platform ios --non-interactive
+      - name: Compilar para el simulador
+        run: |
+          WS=$(ls -d ios/*.xcworkspace | head -1); SCHEME=$(basename "$WS" .xcworkspace)
+          xcodebuild -workspace "$WS" -scheme "$SCHEME" -configuration Release -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' -derivedDataPath build CODE_SIGNING_ALLOWED=NO -quiet
+      - name: Prueba con un líder automático y la app como invitado
+        run: |
+          mkdir -p diag
+          DEV=$(xcrun simctl list devices available -j | node -e 'const d=JSON.parse(require("fs").readFileSync(0,"utf8")).devices;let pm=null,any=null;for(const k in d)for(const x of d[k]){if(/iPhone/.test(x.name)){any=any||x;if(/Pro Max/.test(x.name))pm=x}}const s=pm||any;console.error("simulador:",s.name);console.log(s.udid)')
+          xcrun simctl boot "$DEV"; xcrun simctl bootstatus "$DEV" -b
+          APP=$(find build/Build/Products -name "*.app" -maxdepth 3 | head -1)
+          xcrun simctl install "$DEV" "$APP"
+          xcrun simctl privacy "$DEV" grant microphone com.appr.juntos || true
+          node scripts/e2e-lider.mjs > diag/lider.txt 2>&1 &
+          LIDER=$!
+          for i in $(seq 1 60); do [ -f e2e/sala.json ] && break; sleep 1; done
+          SALA=$(node -e 'console.log(require("./e2e/sala.json").sala)'); TOKEN=$(node -e 'console.log(require("./e2e/sala.json").token)')
+          echo "::add-mask::$TOKEN"
+          xcrun simctl io "$DEV" recordVideo --codec=h264 --force diag/video-simulador.mp4 > /dev/null 2>&1 &
+          REC=$!
+          xcrun simctl launch "$DEV" com.appr.juntos -juntosToken "$TOKEN" -juntosRuta "$SALA" > /dev/null
+          for t in $(seq -w 5 8 165); do sleep 8; xcrun simctl io "$DEV" screenshot "diag/t${t}s.png" >/dev/null 2>&1 || true; done
+          wait $LIDER || true
+          kill -INT $REC; sleep 4
+          xcrun simctl spawn "$DEV" launchctl list | grep -i juntos > diag/proceso.txt || echo "la app NO está corriendo" > diag/proceso.txt
+          rm -rf e2e
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: diagnostico-simulador
+          path: diag/
+          retention-days: 5

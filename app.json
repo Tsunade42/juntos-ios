@@ -1,0 +1,52 @@
+{
+  "expo": {
+    "name": "Juntos",
+    "slug": "juntos",
+    "version": "1.1.0",
+    "orientation": "default",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#0d0f14",
+    "ios": {
+      "bundleIdentifier": "com.appr.juntos",
+      "buildNumber": "1",
+      "supportsTablet": true,
+      "requireFullScreen": false,
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSMicrophoneUsageDescription": "Juntos usa el micrófono para el chat de voz de las salas.",
+        "NSCameraUsageDescription": "Juntos usa la cámara si quieres tomar una foto para el chat o tu perfil.",
+        "NSPhotoLibraryUsageDescription": "Juntos accede a tus fotos y videos solo para enviarlos al chat o subirlos a una sala.",
+        "UIBackgroundModes": [
+          "audio"
+        ],
+        "NSAppTransportSecurity": {
+          "NSAllowsLocalNetworking": true
+        }
+      }
+    },
+    "plugins": [
+      "expo-status-bar",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/icon.png",
+          "imageWidth": 120,
+          "resizeMode": "contain",
+          "backgroundColor": "#0d0f14"
+        }
+      ],
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "Juntos usa el micrófono para el chat de voz de las salas.",
+          "enableBackgroundPlayback": true
+        }
+      ],
+      "expo-asset"
+    ],
+    "extra": {
+      "servidor": "https://30.abis.party"
+    }
+  }
+}
