@@ -31,9 +31,9 @@ fs.mkdirSync('e2e', { recursive: true });
 fs.writeFileSync('e2e/sala.json', JSON.stringify({ sala, token: inv.token }));
 log('sala', sala, 'lista; esperando a que entre el iPhone');
 
-// Esperar a que el iPhone entre (máximo 90 s)
+// Esperar a que el iPhone entre (el simulador de GitHub puede tardar varios minutos en abrir la app)
 let dentro = false;
-for (let i = 0; i < 90 && !dentro; i++) { const m = inbox.find((x) => x.t === 'room:meta' && x.members?.some((u) => u.id === inv.me.id)); if (m) dentro = true; else await sleep(1000); }
+for (let i = 0; i < 420 && !dentro; i++) { const m = inbox.find((x) => x.t === 'room:meta' && x.members?.some((u) => u.id === inv.me.id)); if (m) dentro = true; else await sleep(1000); }
 log(dentro ? 'el iPhone entró a la sala' : 'el iPhone NO entró a la sala');
 
 const HLS = 'https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_fmp4/master.m3u8';
@@ -50,9 +50,10 @@ await sleep(8000);
 send({ t: 'room:control', playing: true, action: 'play' }); log('reanudar');
 await sleep(6000);
 send({ t: 'room:load', item: { provider: 'youtube', mediaId: 'aqz-KE-bpKQ', url: 'https://www.youtube.com/watch?v=aqz-KE-bpKQ', title: 'Big Buck Bunny (YouTube)' } }); log('video de YouTube');
-await sleep(30000);
+await sleep(70000);
 
 // Limpieza: salir y borrar las dos cuentas temporales
 send({ t: 'room:leave' }); await sleep(500); ws.close();
 for (const u of [lider, inv]) { try { await api('/api/account', { password: PASS }, u.token, 'DELETE'); } catch (e) { log('no se pudo borrar', e.message); } }
 log('cuentas temporales borradas; fin');
+fs.writeFileSync('e2e/fin', '1');

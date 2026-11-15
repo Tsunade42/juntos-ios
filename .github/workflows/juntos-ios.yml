@@ -140,7 +140,7 @@ jobs:
           xcrun simctl io "$DEV" recordVideo --codec=h264 --force diag/video-simulador.mp4 > /dev/null 2>&1 &
           REC=$!
           xcrun simctl launch "$DEV" com.appr.juntos -juntosToken "$TOKEN" -juntosRuta "$SALA" > /dev/null
-          for t in $(seq -w 5 8 165); do sleep 8; xcrun simctl io "$DEV" screenshot "diag/t${t}s.png" >/dev/null 2>&1 || true; done
+          for t in $(seq -w 5 8 480); do [ -f e2e/fin ] && break; sleep 8; xcrun simctl io "$DEV" screenshot "diag/t${t}s.png" >/dev/null 2>&1 || true; done
           wait $LIDER || true
           kill -INT $REC; sleep 4
           xcrun simctl spawn "$DEV" launchctl list | grep -i juntos > diag/proceso.txt || echo "la app NO está corriendo" > diag/proceso.txt
