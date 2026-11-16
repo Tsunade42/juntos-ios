@@ -9,6 +9,12 @@ import Constants from 'expo-constants';
 import { setAudioModeAsync } from 'expo-audio';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import * as NavigationBar from 'expo-navigation-bar';
+import { Accelerometer } from 'expo-sensors';
+import { Dimensions } from 'react-native';
+
+// Teléfono (no tableta): fuera del video en pantalla completa se queda en vertical.
+const PHONE = Math.min(Dimensions.get('screen').width, Dimensions.get('screen').height) < 600;
+const O = ScreenOrientation.OrientationLock;
 
 // Solo para pruebas automáticas en el simulador (argumentos de arranque -juntosToken / -juntosRuta / -juntosServidor);
 // un usuario normal no puede pasarlos. El servidor de pruebas solo puede ser uno local de la Mac (localhost).
@@ -69,24 +75,26 @@ function Juntos() {
   // Pantalla completa del video (la pide la página): se quitan las barras del sistema y el margen de los bordes,
   // y si se tocó el botón de pantalla completa se gira a horizontal (como YouTube).
   const [full, setFull] = useState(false);
-  const lockedRef = useRef(false);
   const fullRef = useRef(false);
+  const autoRef = useRef(false);   // la pantalla completa la causó acostar el teléfono (no el botón)
+  const sawLandRef = useRef(false); // ya en pantalla completa, el teléfono estuvo acostado
+  const armedRef = useRef(true);    // acostar el teléfono puede abrir la pantalla completa (se rearma al enderezarlo)
   const setFullscreen = useCallback(async (on, lock) => {
+    const was = fullRef.current;
     setFull(!!on); fullRef.current = !!on;
+    if (on && !was) { autoRef.current = !lock; sawLandRef.current = !lock; }
+    if (!on && was) armedRef.current = false; // salió acostado: no se vuelve a abrir hasta enderezarlo
     try {
       if (Platform.OS === 'android') {
         await NavigationBar.setVisibilityAsync(on ? 'hidden' : 'visible');
         try { await NavigationBar.setBehaviorAsync('overlay-swipe'); } catch { /* sistemas nuevos: ya es así */ }
       }
-      if (on && lock) { lockedRef.current = true; await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE); }
-      else if (!on && lockedRef.current) {
-        // Se salió con el botón: regresa a vertical (como YouTube) y luego se deja girar libre otra vez.
-        lockedRef.current = false;
-        await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
-        setTimeout(() => { ScreenOrientation.unlockAsync().catch(() => {}); }, 2000);
-      } else if (!on) await ScreenOrientation.unlockAsync();
+      if (on) await ScreenOrientation.lockAsync(O.LANDSCAPE); // horizontal (cualquiera de los dos lados)
+      else if (PHONE) await ScreenOrientation.lockAsync(O.PORTRAIT_UP); // todo lo demás, siempre en vertical
+      else await ScreenOrientation.unlockAsync();
     } catch { /* sin permiso del sistema: se queda como está */ }
   }, []);
+  useEffect(() => { if (PHONE) ScreenOrientation.lockAsync(O.PORTRAIT_UP).catch(() => {}); }, []);
   const pad = Platform.OS === 'android' && !full ? { paddingTop: ins.top, paddingBottom: ins.bottom, paddingLeft: ins.left, paddingRight: ins.right } : null;
   const navCanBack = useRef(false);
   const [status, setStatus] = useState('cargando'); // cargando | listo | error
@@ -98,6 +106,25 @@ function Juntos() {
   // La página de Juntos dice dónde va (rect), qué abrir y le manda órdenes; aquí se le regresa lo que reporta la página.
   const [nav, setNav] = useState(null); // { id, url, mode, rect: {x, y, w, h}, visible, pre, n }
   const navRef = useRef(null), navId = useRef(null), preCache = useRef('');
+  // Sensor: acostado ⇒ pantalla completa del video (si hay uno en la sala); enderezado ⇒ regresa a la sala.
+  useEffect(() => {
+    if (!PHONE) return undefined;
+    let pose = null, since = 0, lastCmd = 0;
+    Accelerometer.setUpdateInterval(250);
+    const sub = Accelerometer.addListener(({ x, y }) => {
+      const ax = Math.abs(x), ay = Math.abs(y);
+      const p = ax > 0.7 && ay < 0.45 ? 'land' : ay > 0.7 && ax < 0.45 ? 'port' : null; // acostado sobre la mesa: no cuenta
+      if (!p) { pose = null; return; }
+      if (p !== pose) { pose = p; since = Date.now(); return; }
+      if (Date.now() - since < 450 || Date.now() - lastCmd < 1500 || !web.current) return;
+      if (p === 'port') {
+        armedRef.current = true;
+        if (fullRef.current && (autoRef.current || sawLandRef.current)) { lastCmd = Date.now(); web.current.injectJavaScript('window.__juntosExitFull && window.__juntosExitFull(); true;'); }
+      } else if (fullRef.current) sawLandRef.current = true;
+      else if (armedRef.current && AppState.currentState === 'active') { armedRef.current = false; lastCmd = Date.now(); web.current.injectJavaScript('window.__juntosAutoFull && window.__juntosAutoFull(); true;'); }
+    });
+    return () => sub.remove();
+  }, []);
   const toWeb = (m) => { if (web.current) web.current.injectJavaScript('window.__juntosNav && window.__juntosNav(' + js(m) + '); true;'); };
   const onNavCmd = async (m) => {
     if (m.op === 'open') {
