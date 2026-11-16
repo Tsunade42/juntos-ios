@@ -7,6 +7,8 @@ import { StatusBar } from 'expo-status-bar';
 import { WebView } from 'react-native-webview';
 import Constants from 'expo-constants';
 import { setAudioModeAsync } from 'expo-audio';
+import * as ScreenOrientation from 'expo-screen-orientation';
+import * as NavigationBar from 'expo-navigation-bar';
 
 // Solo para pruebas automáticas en el simulador (argumentos de arranque -juntosToken / -juntosRuta / -juntosServidor);
 // un usuario normal no puede pasarlos. El servidor de pruebas solo puede ser uno local de la Mac (localhost).
@@ -64,7 +66,28 @@ export default function App() {
 function Juntos() {
   // iPhone: la página respeta muesca y bordes por su cuenta (viewport-fit=cover). Android: se deja el espacio aquí.
   const ins = useSafeAreaInsets();
-  const pad = Platform.OS === 'android' ? { paddingTop: ins.top, paddingBottom: ins.bottom, paddingLeft: ins.left, paddingRight: ins.right } : null;
+  // Pantalla completa del video (la pide la página): se quitan las barras del sistema y el margen de los bordes,
+  // y si se tocó el botón de pantalla completa se gira a horizontal (como YouTube).
+  const [full, setFull] = useState(false);
+  const lockedRef = useRef(false);
+  const fullRef = useRef(false);
+  const setFullscreen = useCallback(async (on, lock) => {
+    setFull(!!on); fullRef.current = !!on;
+    try {
+      if (Platform.OS === 'android') {
+        await NavigationBar.setVisibilityAsync(on ? 'hidden' : 'visible');
+        try { await NavigationBar.setBehaviorAsync('overlay-swipe'); } catch { /* sistemas nuevos: ya es así */ }
+      }
+      if (on && lock) { lockedRef.current = true; await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE); }
+      else if (!on && lockedRef.current) {
+        // Se salió con el botón: regresa a vertical (como YouTube) y luego se deja girar libre otra vez.
+        lockedRef.current = false;
+        await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
+        setTimeout(() => { ScreenOrientation.unlockAsync().catch(() => {}); }, 2000);
+      } else if (!on) await ScreenOrientation.unlockAsync();
+    } catch { /* sin permiso del sistema: se queda como está */ }
+  }, []);
+  const pad = Platform.OS === 'android' && !full ? { paddingTop: ins.top, paddingBottom: ins.bottom, paddingLeft: ins.left, paddingRight: ins.right } : null;
   const navCanBack = useRef(false);
   const [status, setStatus] = useState('cargando'); // cargando | listo | error
   const [reloadKey, setReloadKey] = useState(0);
@@ -107,6 +130,7 @@ function Juntos() {
     let m = null; try { m = JSON.parse(e.nativeEvent.data); } catch { return; }
     if (m && m.type === 'youtube-login') setYtLogin(true);
     else if (m && m.type === 'nav') onNavCmd(m);
+    else if (m && m.type === 'fullscreen') setFullscreen(!!m.on, !!m.lock);
   };
   // Al llegar a YouTube con la sesión iniciada se cierra la hoja y se recarga Juntos (comparten la sesión).
   const onLoginNav = (nav) => {
@@ -118,6 +142,8 @@ function Juntos() {
     if (Platform.OS !== 'android') return undefined;
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
       if (ytLogin) { setYtLogin(false); return true; }
+      // en pantalla completa, "atrás" solo sale de ella (como en YouTube), no de la sala
+      if (fullRef.current && web.current) { web.current.injectJavaScript("window.__juntosExitFull && window.__juntosExitFull(); true;"); return true; }
       if (navId.current && navRef.current && navCanBack.current) { navRef.current.goBack(); return true; }
       if (webCanBack.current && web.current) { web.current.goBack(); return true; }
       return false;
@@ -152,7 +178,7 @@ function Juntos() {
   return (
     // La vista se encoge cuando aparece el teclado: lo que escribes queda siempre visible arriba de él.
     <KeyboardAvoidingView style={[styles.fill, pad]} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-      <StatusBar style="light" />
+      <StatusBar style="light" hidden={full} />
       <View style={styles.fill}>
       <WebView
         key={reloadKey}
@@ -186,13 +212,15 @@ function Juntos() {
         keyboardDisplayRequiresUserAction={false}
         setSupportMultipleWindows={false}
         applicationNameForUserAgent={APP_TAG}
+        showsVerticalScrollIndicator={false}
+        showsHorizontalScrollIndicator={false}
         onNavigationStateChange={(s) => { webCanBack.current = !!s.canGoBack; }}
         androidLayerType="hardware"
         mixedContentMode="never"
         injectedJavaScriptBeforeContentLoaded={BEFORE}
         onShouldStartLoadWithRequest={onShouldStart}
         onOpenWindow={(e) => { const u = e.nativeEvent.targetUrl; if (u) Linking.openURL(u).catch(() => {}); }}
-        onLoadStart={(e) => { dbgNativo('onLoadStart ' + e.nativeEvent.url); navId.current = null; setNav(null); }}
+        onLoadStart={(e) => { dbgNativo('onLoadStart ' + e.nativeEvent.url); navId.current = null; setNav(null); setFullscreen(false); }}
         onLoadEnd={(e) => { dbgNativo('onLoadEnd ' + e.nativeEvent.url); setStatus((s) => (s === 'error' ? s : 'listo')); }}
         onError={(e) => { dbgNativo('onError ' + JSON.stringify(e.nativeEvent).slice(0, 300)); setStatus('error'); }}
         onHttpError={(e) => { if (e.nativeEvent.statusCode >= 500) setStatus('error'); }}
