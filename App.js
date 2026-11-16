@@ -1,7 +1,8 @@
-// Juntos para iPhone/iPad: abre Juntos (https://30.abis.party) a pantalla completa como app nativa:
+// Juntos para iPhone/iPad y Android: abre Juntos (https://30.abis.party) a pantalla completa como app nativa:
 // sin zoom, sin rebote ni gestos de navegador, con micrófono para la voz, video en línea, AirPlay y PiP.
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { View, Text, Pressable, ActivityIndicator, Linking, StyleSheet, Image, AppState, Animated, KeyboardAvoidingView, Platform, Settings, Modal } from 'react-native';
+import { View, Text, Pressable, ActivityIndicator, Linking, StyleSheet, Image, AppState, Animated, KeyboardAvoidingView, Platform, Settings, Modal, BackHandler } from 'react-native';
+import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { WebView } from 'react-native-webview';
 import Constants from 'expo-constants';
@@ -21,6 +22,10 @@ const ORIGIN = SERVER.replace(/^(https?:\/\/[^/]+).*$/, '$1');
 const BG = '#0d0f14';
 // Para el inicio de sesión de Google se usa la identidad de Safari (Google rechaza navegadores "integrados").
 const SAFARI_UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1';
+// En Android, el navegador integrado se presenta como Chrome para celular (sin la marca de "vista web").
+const CHROME_UA = 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Mobile Safari/537.36';
+const NAV_UA = Platform.OS === 'android' ? CHROME_UA : SAFARI_UA;
+const APP_TAG = Platform.OS === 'android' ? 'JuntosAndroid/1.1' : 'JuntosiOS/1.0';
 
 // Sonido de la app: suena aunque el iPhone esté en silencio, sigue en segundo plano y sale por la bocina
 // (no por el auricular de llamadas) también cuando el micrófono está activo.
@@ -53,6 +58,14 @@ const BEFORE = `
   true;`;
 
 export default function App() {
+  return <SafeAreaProvider><Juntos /></SafeAreaProvider>;
+}
+
+function Juntos() {
+  // iPhone: la página respeta muesca y bordes por su cuenta (viewport-fit=cover). Android: se deja el espacio aquí.
+  const ins = useSafeAreaInsets();
+  const pad = Platform.OS === 'android' ? { paddingTop: ins.top, paddingBottom: ins.bottom, paddingLeft: ins.left, paddingRight: ins.right } : null;
+  const navCanBack = useRef(false);
   const [status, setStatus] = useState('cargando'); // cargando | listo | error
   const [reloadKey, setReloadKey] = useState(0);
   const [hidden, setHidden] = useState(false);
@@ -100,6 +113,17 @@ export default function App() {
     if (!nav.loading && /^https:\/\/(m|www)\.youtube\.com\//i.test(nav.url || '')) { setYtLogin(false); setTimeout(() => web.current && web.current.reload(), 300); }
   };
   const fade = useRef(new Animated.Value(1)).current;
+  const webCanBack = useRef(false);
+  useEffect(() => {
+    if (Platform.OS !== 'android') return undefined;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (ytLogin) { setYtLogin(false); return true; }
+      if (navId.current && navRef.current && navCanBack.current) { navRef.current.goBack(); return true; }
+      if (webCanBack.current && web.current) { web.current.goBack(); return true; }
+      return false;
+    });
+    return () => sub.remove();
+  }, [ytLogin]);
 
   const retry = useCallback(() => { dbgNativo('retry: se vuelve a montar la WebView'); fade.setValue(1); setHidden(false); setStatus('cargando'); setReloadKey((k) => k + 1); }, [fade]);
 
@@ -127,8 +151,9 @@ export default function App() {
 
   return (
     // La vista se encoge cuando aparece el teclado: lo que escribes queda siempre visible arriba de él.
-    <KeyboardAvoidingView style={styles.fill} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+    <KeyboardAvoidingView style={[styles.fill, pad]} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
       <StatusBar style="light" />
+      <View style={styles.fill}>
       <WebView
         key={reloadKey}
         ref={web}
@@ -154,13 +179,16 @@ export default function App() {
         allowsLinkPreview={false}
         pullToRefreshEnabled={false}
         textInteractionEnabled
-        dataDetectorTypes="none"
+        dataDetectorTypes={["none"]}
         automaticallyAdjustContentInsets={false}
         contentInsetAdjustmentBehavior="never"
         hideKeyboardAccessoryView
         keyboardDisplayRequiresUserAction={false}
         setSupportMultipleWindows={false}
-        applicationNameForUserAgent="JuntosiOS/1.0"
+        applicationNameForUserAgent={APP_TAG}
+        onNavigationStateChange={(s) => { webCanBack.current = !!s.canGoBack; }}
+        androidLayerType="hardware"
+        mixedContentMode="never"
         injectedJavaScriptBeforeContentLoaded={BEFORE}
         onShouldStartLoadWithRequest={onShouldStart}
         onOpenWindow={(e) => { const u = e.nativeEvent.targetUrl; if (u) Linking.openURL(u).catch(() => {}); }}
@@ -179,7 +207,7 @@ export default function App() {
             ref={navRef}
             source={{ uri: nav.url }}
             style={{ flex: 1, backgroundColor: '#000' }}
-            userAgent={SAFARI_UA}
+            userAgent={NAV_UA}
             originWhitelist={['*']}
             javaScriptEnabled
             domStorageEnabled
@@ -202,7 +230,7 @@ export default function App() {
             injectedJavaScriptForMainFrameOnly={false}
             // Solo páginas web: nada de saltar a otras apps (netflix://, itms-apps://…)
             onShouldStartLoadWithRequest={(r) => /^(https?:|about:|blob:|data:)/i.test(r.url || '')}
-            onNavigationStateChange={(s) => toWeb({ id: nav.id, t: 'nav', url: s.url, title: s.title, loading: s.loading, canGoBack: s.canGoBack, canGoForward: s.canGoForward })}
+            onNavigationStateChange={(s) => { navCanBack.current = !!s.canGoBack; toWeb({ id: nav.id, t: 'nav', url: s.url, title: s.title, loading: s.loading, canGoBack: s.canGoBack, canGoForward: s.canGoForward }); }}
             onError={(e) => { dbgNativo('navegador: error ' + JSON.stringify(e.nativeEvent).slice(0, 200)); toWeb({ id: nav.id, t: 'fail', code: e.nativeEvent.code, desc: e.nativeEvent.description }); }}
             onContentProcessDidTerminate={() => { dbgNativo('navegador: el proceso web se cerró, recargando'); navRef.current && navRef.current.reload(); }}
             onMessage={onNavMessage}
@@ -248,6 +276,7 @@ export default function App() {
           </View>
         </View>
       )}
+      </View>
     </KeyboardAvoidingView>
   );
 }

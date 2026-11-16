@@ -17,3 +17,8 @@ credentials.json
 credenciales/
 .DS_Store
 .env*
+
+*.jks
+*.keystore
+!android/app/debug.keystore
+firma-android/
