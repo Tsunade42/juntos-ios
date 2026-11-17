@@ -6,7 +6,8 @@
   "scripts": {
     "start": "expo start",
     "ios": "expo run:ios",
-    "iconos": "node scripts/iconos.js"
+    "iconos": "node scripts/iconos.js",
+    "postinstall": "node scripts/parche-webview.js"
   },
   "dependencies": {
     "expo": "^57.0.0",

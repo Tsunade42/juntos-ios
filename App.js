@@ -33,7 +33,7 @@ const SAFARI_UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleW
 // En Android, el navegador integrado se presenta como Chrome para celular (sin la marca de "vista web").
 const CHROME_UA = 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Mobile Safari/537.36';
 const NAV_UA = Platform.OS === 'android' ? CHROME_UA : SAFARI_UA;
-const APP_TAG = Platform.OS === 'android' ? 'JuntosAndroid/1.1' : 'JuntosiOS/1.0';
+const APP_TAG = Platform.OS === 'android' ? 'JuntosAndroid/1.1' : 'JuntosiOS/1.0'; // (no cambiar: la página reconoce la app por esta marca)
 
 // Sonido de la app: suena aunque el iPhone esté en silencio, sigue en segundo plano y sale por la bocina
 // (no por el auricular de llamadas) también cuando el micrófono está activo.
