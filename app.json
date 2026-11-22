@@ -50,7 +50,8 @@
           "androidAppId": "ca-app-pub-7258575032949973~6999733512",
           "iosAppId": "ca-app-pub-3940256099942544~1458002511"
         }
-      ]
+      ],
+      "expo-iap"
     ],
     "extra": {
       "servidor": "https://30.abis.party"
