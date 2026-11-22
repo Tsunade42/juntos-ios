@@ -2,7 +2,7 @@
   "expo": {
     "name": "Juntos",
     "slug": "juntos",
-    "version": "1.1.3",
+    "version": "1.2.0",
     "orientation": "default",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
@@ -43,14 +43,21 @@
           "enableBackgroundPlayback": true
         }
       ],
-      "expo-asset"
+      "expo-asset",
+      [
+        "react-native-google-mobile-ads",
+        {
+          "androidAppId": "ca-app-pub-3940256099942544~3347511713",
+          "iosAppId": "ca-app-pub-3940256099942544~1458002511"
+        }
+      ]
     ],
     "extra": {
       "servidor": "https://30.abis.party"
     },
     "android": {
       "package": "com.appr.juntos",
-      "versionCode": 4,
+      "versionCode": 5,
       "adaptiveIcon": {
         "foregroundImage": "./assets/icon.png",
         "backgroundColor": "#0d0f14"

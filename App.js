@@ -15,6 +15,8 @@ import { Dimensions } from 'react-native';
 // Teléfono (no tableta): fuera del video en pantalla completa se queda en vertical.
 const PHONE = Math.min(Dimensions.get('screen').width, Dimensions.get('screen').height) < 600;
 const O = ScreenOrientation.OrientationLock;
+// Anuncios (AdMob): por ahora solo en Android. En iPhone la librería ni se carga.
+const Ads = Platform.OS === 'android' ? (() => { try { return require('react-native-google-mobile-ads'); } catch { return null; } })() : null;
 
 // Solo para pruebas automáticas en el simulador (argumentos de arranque -juntosToken / -juntosRuta / -juntosServidor);
 // un usuario normal no puede pasarlos. El servidor de pruebas solo puede ser uno local de la Mac (localhost).
@@ -52,6 +54,7 @@ const START_URL = SERVER + (E2E_RUTA && /^[\w-]+$/.test(String(E2E_RUTA)) ? '/r/
 const BEFORE = `
   window.juntosIOS = true;
   window.juntosNav = 1; // esta versión trae navegador integrado (YouTube completo, servicios y páginas dentro de la sala)
+  window.juntosAds = ${Ads ? 1 : 0}; // la app puede mostrar un banner pequeño en las listas (solo Android)
   ${E2E_SERVIDOR ? 'window.juntosE2E = true;' : ''}
   ${E2E_TOKEN ? `try { localStorage.setItem('juntos-token', ${JSON.stringify(String(E2E_TOKEN))}); } catch (e) {}` : ''}
   (function () {
@@ -101,6 +104,21 @@ function Juntos() {
   const [reloadKey, setReloadKey] = useState(0);
   const [hidden, setHidden] = useState(false);
   const [ytLogin, setYtLogin] = useState(false); // hoja para iniciar sesión en YouTube dentro de la app
+  // Anuncio: la página dice dónde va (hueco arriba de la barra de abajo) y cuándo se puede ver (nunca en la sala,
+  // en pantalla completa, con ventanas abiertas o con el teclado). La configuración (activo / bloque) viene del servidor.
+  const [ad, setAd] = useState(null); // { visible, rect }
+  const [adCfg, setAdCfg] = useState(null);
+  const [adKey, setAdKey] = useState(0); // cambiarlo vuelve a pedir un anuncio (reintento si no llegó)
+  const adFilled = useRef(false), adRetry = useRef(null);
+  // Se le avisa a la página si ya hay anuncio: solo así reserva el hueco (sin anuncio no se ve una franja vacía).
+  const tellAd = (ok) => { adFilled.current = ok; if (web.current) web.current.injectJavaScript('window.__juntosAdState && window.__juntosAdState(' + (ok ? 'true' : 'false') + '); true;'); };
+  const adShow = !!(ad && ad.visible && ad.rect && !full);
+  const adRect = (ad && ad.rect) || { x: 0, y: 0, w: 360, h: 58 };
+  useEffect(() => {
+    if (!Ads) return;
+    Ads.default().initialize().catch(() => {});
+    fetch(SERVER + '/api/anuncios', { cache: 'no-store' }).then((r) => r.json()).then((j) => setAdCfg((j && j.android) || null)).catch(() => {});
+  }, []);
   const web = useRef(null);
   // Navegador integrado: una vista web real colocada justo encima del hueco del video de la sala.
   // La página de Juntos dice dónde va (rect), qué abrir y le manda órdenes; aquí se le regresa lo que reporta la página.
@@ -158,6 +176,7 @@ function Juntos() {
     if (m && m.type === 'youtube-login') setYtLogin(true);
     else if (m && m.type === 'nav') onNavCmd(m);
     else if (m && m.type === 'fullscreen') setFullscreen(!!m.on, !!m.lock);
+    else if (m && m.type === 'ad') setAd({ visible: !!m.visible, rect: m.rect || null });
   };
   // Al llegar a YouTube con la sesión iniciada se cierra la hoja y se recarga Juntos (comparten la sesión).
   const onLoginNav = (nav) => {
@@ -248,7 +267,7 @@ function Juntos() {
         onShouldStartLoadWithRequest={onShouldStart}
         onOpenWindow={(e) => { const u = e.nativeEvent.targetUrl; if (u) Linking.openURL(u).catch(() => {}); }}
         onLoadStart={(e) => { dbgNativo('onLoadStart ' + e.nativeEvent.url); navId.current = null; setNav(null); setFullscreen(false); }}
-        onLoadEnd={(e) => { dbgNativo('onLoadEnd ' + e.nativeEvent.url); setStatus((s) => (s === 'error' ? s : 'listo')); }}
+        onLoadEnd={(e) => { dbgNativo('onLoadEnd ' + e.nativeEvent.url); setStatus((s) => (s === 'error' ? s : 'listo')); if (adFilled.current) setTimeout(() => tellAd(true), 800); }}
         onError={(e) => { dbgNativo('onError ' + JSON.stringify(e.nativeEvent).slice(0, 300)); setStatus('error'); }}
         onHttpError={(e) => { if (e.nativeEvent.statusCode >= 500) setStatus('error'); }}
         onContentProcessDidTerminate={() => { dbgNativo('EL PROCESO WEB SE CERRÓ: recargando'); web.current && web.current.reload(); }}
@@ -289,6 +308,23 @@ function Juntos() {
             onError={(e) => { dbgNativo('navegador: error ' + JSON.stringify(e.nativeEvent).slice(0, 200)); toWeb({ id: nav.id, t: 'fail', code: e.nativeEvent.code, desc: e.nativeEvent.description }); }}
             onContentProcessDidTerminate={() => { dbgNativo('navegador: el proceso web se cerró, recargando'); navRef.current && navRef.current.reload(); }}
             onMessage={onNavMessage}
+          />
+        </View>
+      )}
+
+      {Ads && adCfg && adCfg.activo !== false && (
+        // El banner se tiene listo fuera de la pantalla; solo se coloca en su hueco cuando la página lo permite.
+        <View pointerEvents={adShow ? 'box-none' : 'none'} style={{ position: 'absolute', left: adShow ? adRect.x : -3000, top: adShow ? adRect.y : 0, width: adRect.w, height: adRect.h, alignItems: 'center', justifyContent: 'center', opacity: adShow ? 1 : 0 }}>
+          <Ads.BannerAd
+            key={adKey}
+            unitId={adCfg.banner || Ads.TestIds.BANNER}
+            size={Ads.BannerAdSize.BANNER}
+            requestOptions={{ requestNonPersonalizedAdsOnly: true }}
+            onAdLoaded={() => { dbgNativo('anuncio: cargó'); tellAd(true); }}
+            onAdFailedToLoad={(e) => {
+              dbgNativo('anuncio: no cargó ' + (e && (e.code || e.message)));
+              tellAd(false); clearTimeout(adRetry.current); adRetry.current = setTimeout(() => setAdKey((k) => k + 1), 45000);
+            }}
           />
         </View>
       )}
