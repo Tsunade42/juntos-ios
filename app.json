@@ -74,6 +74,10 @@
         "android.permission.ACCESS_COARSE_LOCATION"
       ]
     },
-    "scheme": "juntos"
+    "scheme": "juntos",
+    "androidNavigationBar": {
+      "backgroundColor": "#0a0b0f",
+      "barStyle": "light-content"
+    }
   }
 }

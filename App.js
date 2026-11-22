@@ -102,6 +102,12 @@ function Juntos() {
     } catch { /* sin permiso del sistema: se queda como está */ }
   }, []);
   useEffect(() => { if (PHONE) ScreenOrientation.lockAsync(O.PORTRAIT_UP).catch(() => {}); }, []);
+  // Barra de Android (línea o los 3 botones): oscura como la app, con íconos claros (antes salía gris claro).
+  useEffect(() => {
+    if (Platform.OS !== 'android' || full) return;
+    NavigationBar.setBackgroundColorAsync('#0a0b0f').catch(() => {});
+    NavigationBar.setButtonStyleAsync('light').catch(() => {});
+  }, [full]);
   const pad = Platform.OS === 'android' && !full ? { paddingTop: ins.top, paddingBottom: ins.bottom, paddingLeft: ins.left, paddingRight: ins.right } : null;
   const navCanBack = useRef(false);
   const [status, setStatus] = useState('cargando'); // cargando | listo | error
