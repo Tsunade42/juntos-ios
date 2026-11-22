@@ -15,7 +15,8 @@ const release = `
             }
         }`;
 s = s.replace(/(signingConfigs \{\s*\n\s*debug \{[\s\S]*?\n\s*\})/, `$1${release}`);
-s = s.replace(/(release \{\s*\n\s*\/\/ Caution![^\n]*\n[^\n]*\n\s*)signingConfig signingConfigs\.debug/, '$1signingConfig signingConfigs.release');
-if (!s.includes('signingConfig signingConfigs.release')) { console.error('No se pudo poner la firma'); process.exit(1); }
+// (las plantillas nuevas de Expo escriben «signingConfig = signingConfigs.debug»; las viejas, sin «=»)
+s = s.replace(/(release \{\s*\n\s*\/\/ Caution![^\n]*\n[^\n]*\n\s*)signingConfig(\s*=)?\s*signingConfigs\.debug/, '$1signingConfig = signingConfigs.release');
+if (!/signingConfig\s*=?\s*signingConfigs\.release/.test(s)) { console.error('No se pudo poner la firma'); process.exit(1); }
 fs.writeFileSync(F, s);
 console.log('firma de lanzamiento puesta');

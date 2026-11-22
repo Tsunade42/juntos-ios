@@ -107,8 +107,8 @@ function Juntos() {
   // Barra de Android (línea o los 3 botones): oscura como la app, con íconos claros (antes salía gris claro).
   useEffect(() => {
     if (Platform.OS !== 'android' || full) return;
-    NavigationBar.setBackgroundColorAsync('#0a0b0f').catch(() => {});
-    NavigationBar.setButtonStyleAsync('light').catch(() => {});
+    // (versión nueva de expo-navigation-bar: la app se dibuja de orilla a orilla; solo se elige el estilo de los íconos)
+    try { const st = NavigationBar.setStyle || (NavigationBar.NavigationBar && NavigationBar.NavigationBar.setStyle); if (typeof st === 'function') st('dark'); } catch { /* */ }
   }, [full]);
   const pad = Platform.OS === 'android' && !full ? { paddingTop: ins.top, paddingBottom: ins.bottom, paddingLeft: ins.left, paddingRight: ins.right } : null;
   const navCanBack = useRef(false);

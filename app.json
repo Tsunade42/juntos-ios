@@ -2,7 +2,7 @@
   "expo": {
     "name": "Juntos",
     "slug": "juntos",
-    "version": "1.3.0",
+    "version": "1.4.0",
     "orientation": "default",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
@@ -51,14 +51,20 @@
           "iosAppId": "ca-app-pub-3940256099942544~1458002511"
         }
       ],
-      "expo-iap"
+      "expo-iap",
+      [
+        "expo-navigation-bar",
+        {
+          "enforceContrast": false
+        }
+      ]
     ],
     "extra": {
       "servidor": "https://30.abis.party"
     },
     "android": {
       "package": "com.appr.juntos",
-      "versionCode": 6,
+      "versionCode": 7,
       "adaptiveIcon": {
         "foregroundImage": "./assets/icon.png",
         "backgroundColor": "#0d0f14"
@@ -74,10 +80,6 @@
         "android.permission.ACCESS_COARSE_LOCATION"
       ]
     },
-    "scheme": "juntos",
-    "androidNavigationBar": {
-      "backgroundColor": "#0a0b0f",
-      "barStyle": "light-content"
-    }
+    "scheme": "juntos"
   }
 }
