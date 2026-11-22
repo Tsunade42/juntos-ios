@@ -112,6 +112,42 @@ function Juntos() {
   const adFilled = useRef(false), adRetry = useRef(null);
   // Se le avisa a la página si ya hay anuncio: solo así reserva el hueco (sin anuncio no se ve una franja vacía).
   const tellAd = (ok) => { adFilled.current = ok; if (web.current) web.current.injectJavaScript('window.__juntosAdState && window.__juntosAdState(' + (ok ? 'true' : 'false') + '); true;'); };
+  // Anuncio de video antes de crear sala (sin Plus). La página solo continúa si se vio completo; si no carga, no se bloquea.
+  const toPage = (fn, v) => { if (web.current) web.current.injectJavaScript('window.' + fn + ' && window.' + fn + '(' + js(v) + '); true;'); };
+  const showRewarded = () => {
+    if (!Ads) return toPage('__juntosRewarded', { error: 'sin anuncios' });
+    let earned = false, finished = false;
+    const finish = (v) => { if (finished) return; finished = true; toPage('__juntosRewarded', v); };
+    try {
+      const ad2 = Ads.RewardedAd.createForAdRequest((adCfg && adCfg.rewarded) || Ads.TestIds.REWARDED, { requestNonPersonalizedAdsOnly: true });
+      const subs = [];
+      const off = () => subs.forEach((u) => { try { u(); } catch { /* */ } });
+      subs.push(ad2.addAdEventListener(Ads.RewardedAdEventType.LOADED, () => { dbgNativo('anuncio de video: cargó'); ad2.show().catch(() => { off(); finish({ error: 'no se pudo mostrar' }); }); }));
+      subs.push(ad2.addAdEventListener(Ads.RewardedAdEventType.EARNED_REWARD, () => { earned = true; }));
+      subs.push(ad2.addAdEventListener(Ads.AdEventType.CLOSED, () => { off(); finish({ ok: earned }); }));
+      subs.push(ad2.addAdEventListener(Ads.AdEventType.ERROR, (e) => { dbgNativo('anuncio de video: no cargó ' + (e && (e.code || e.message))); off(); finish({ error: 'no cargó' }); }));
+      ad2.load();
+      setTimeout(() => { if (!finished && !ad2.loaded) { off(); finish({ error: 'tardó demasiado' }); } }, 20000);
+    } catch (e) { finish({ error: String(e && e.message) }); }
+  };
+  // Inicio con Google: navegador del sistema (Google no deja iniciar sesión dentro de vistas web) y regreso con juntos://
+  const authGoogle = async (url) => {
+    try {
+      const WebBrowser = require('expo-web-browser');
+      const r = await WebBrowser.openAuthSessionAsync(url, 'juntos://auth');
+      if (r.type !== 'success' || !r.url) return toPage('__juntosAuthResult', { cancel: true });
+      const q = new URLSearchParams(r.url.split('?')[1] || '');
+      toPage('__juntosAuthResult', q.get('token') ? { token: q.get('token') } : { error: q.get('error') || 'No se pudo iniciar sesión con Google.' });
+    } catch (e) { toPage('__juntosAuthResult', { error: 'No se pudo abrir el inicio de sesión de Google.' }); }
+  };
+  // Inicio con Apple (solo iPhone): Apple da un token firmado y el servidor lo verifica.
+  const authApple = async () => {
+    try {
+      const AppleAuth = require('expo-apple-authentication');
+      const c = await AppleAuth.signInAsync({ requestedScopes: [AppleAuth.AppleAuthenticationScope.FULL_NAME, AppleAuth.AppleAuthenticationScope.EMAIL] });
+      toPage('__juntosAuthResult', { identityToken: c.identityToken, givenName: c.fullName && c.fullName.givenName, familyName: c.fullName && c.fullName.familyName });
+    } catch (e) { toPage('__juntosAuthResult', e && e.code === 'ERR_REQUEST_CANCELED' ? { cancel: true } : { error: 'No se pudo iniciar sesión con Apple.' }); }
+  };
   const adShow = !!(ad && ad.visible && ad.rect && !full);
   const adRect = (ad && ad.rect) || { x: 0, y: 0, w: 360, h: 58 };
   useEffect(() => {
@@ -177,6 +213,9 @@ function Juntos() {
     else if (m && m.type === 'nav') onNavCmd(m);
     else if (m && m.type === 'fullscreen') setFullscreen(!!m.on, !!m.lock);
     else if (m && m.type === 'ad') setAd({ visible: !!m.visible, rect: m.rect || null });
+    else if (m && m.type === 'ad-rewarded') showRewarded();
+    else if (m && m.type === 'auth-google') authGoogle(m.url);
+    else if (m && m.type === 'auth-apple') authApple();
   };
   // Al llegar a YouTube con la sesión iniciada se cierra la hoja y se recarga Juntos (comparten la sesión).
   const onLoginNav = (nav) => {
