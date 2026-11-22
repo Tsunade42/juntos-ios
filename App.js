@@ -153,7 +153,7 @@ function Juntos() {
   useEffect(() => {
     if (!Ads) return;
     Ads.default().initialize().catch(() => {});
-    fetch(SERVER + '/api/anuncios', { cache: 'no-store' }).then((r) => r.json()).then((j) => setAdCfg((j && j.android) || null)).catch(() => {});
+    fetch(SERVER + '/api/anuncios?real=1', { cache: 'no-store' }).then((r) => r.json()).then((j) => setAdCfg((j && j.android) || null)).catch(() => {});
   }, []);
   const web = useRef(null);
   // Navegador integrado: una vista web real colocada justo encima del hueco del video de la sala.
