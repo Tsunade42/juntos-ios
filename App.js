@@ -20,6 +20,8 @@ const Ads = Platform.OS === 'android' ? (() => { try { return require('react-nat
 // Juntos Plus con Google Play (solo Android). La compra la hace Google; el servidor la confirma con la API de Google Play.
 const IAP = Platform.OS === 'android' ? (() => { try { return require('expo-iap'); } catch { return null; } })() : null;
 const PLAY_PACKAGE = 'com.appr.juntos';
+// Direcciones típicas de anuncios que los sitios de video abren al tocar la página: el navegador integrado no las carga.
+const AD_URL = /\/afu\.php|[?&]zoneid=|\/click\?key=|\/lander\/|popunder|popads|propellerads|adsterra|exoclick|juicyads|onclickads|clickadu|hilltopads|trafficjunky|adcash|galaksion|monetag/i;
 
 // Solo para pruebas automáticas en el simulador (argumentos de arranque -juntosToken / -juntosRuta / -juntosServidor);
 // un usuario normal no puede pasarlos. El servidor de pruebas solo puede ser uno local de la Mac (localhost).
@@ -419,7 +421,7 @@ function Juntos() {
             injectedJavaScript={navScript(nav.mode, nav.pre)}
             injectedJavaScriptForMainFrameOnly={false}
             // Solo páginas web: nada de saltar a otras apps (netflix://, itms-apps://…)
-            onShouldStartLoadWithRequest={(r) => /^(https?:|about:|blob:|data:)/i.test(r.url || '')}
+            onShouldStartLoadWithRequest={(r) => /^(https?:|about:|blob:|data:)/i.test(r.url || '') && !(r.isTopFrame !== false && AD_URL.test(r.url || ''))}
             onNavigationStateChange={(s) => { navCanBack.current = !!s.canGoBack; toWeb({ id: nav.id, t: 'nav', url: s.url, title: s.title, loading: s.loading, canGoBack: s.canGoBack, canGoForward: s.canGoForward }); }}
             onError={(e) => { dbgNativo('navegador: error ' + JSON.stringify(e.nativeEvent).slice(0, 200)); toWeb({ id: nav.id, t: 'fail', code: e.nativeEvent.code, desc: e.nativeEvent.description }); }}
             onContentProcessDidTerminate={() => { dbgNativo('navegador: el proceso web se cerró, recargando'); navRef.current && navRef.current.reload(); }}
