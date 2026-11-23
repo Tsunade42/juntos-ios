@@ -21,7 +21,10 @@ const O = ScreenOrientation.OrientationLock;
 const Ads = (() => { try { return require('react-native-google-mobile-ads'); } catch { return null; } })();
 let adsPersonal = false; // Android: sin personalizar, como siempre; iPhone: personalizados solo si la persona lo permite
 // Juntos Plus con Google Play (solo Android). La compra la hace Google; el servidor la confirma con la API de Google Play.
-const IAP = Platform.OS === 'android' ? (() => { try { return require('expo-iap'); } catch { return null; } })() : null;
+// Juntos Plus: Google Play en Android y App Store en iPhone (la misma librería maneja las dos tiendas).
+const IAP = (() => { try { return require('expo-iap'); } catch { return null; } })();
+const IOS = Platform.OS === 'ios';
+const STORE = IOS ? 'App Store' : 'Google Play';
 const PLAY_PACKAGE = 'com.appr.juntos';
 // Direcciones típicas de anuncios que los sitios de video abren al tocar la página: el navegador integrado no las carga.
 const AD_URL = /\/afu\.php|[?&]zoneid=|\/click\?key=|\/lander\/|popunder|popads|propellerads|adsterra|exoclick|juicyads|onclickads|clickadu|hilltopads|trafficjunky|adcash|galaksion|monetag/i;
@@ -66,7 +69,8 @@ const BEFORE = `
   window.juntosIOS = true;
   window.juntosNav = 1; // esta versión trae navegador integrado (YouTube completo, servicios y páginas dentro de la sala)
   window.juntosAds = ${Ads ? 1 : 0}; // la app puede mostrar anuncios (banner en las listas y video al crear sala)
-  window.juntosPlay = ${IAP ? 1 : 0}; // Juntos Plus se paga con Google Play (solo Android)
+  window.juntosPlay = ${IAP ? 1 : 0}; // Juntos Plus se paga con la tienda del teléfono
+  window.juntosStore = '${IOS ? 'apple' : 'google'}';
   ${E2E_SERVIDOR ? 'window.juntosE2E = true;' : ''}
   ${E2E_TOKEN ? `try { localStorage.setItem('juntos-token', ${JSON.stringify(String(E2E_TOKEN))}); } catch (e) {}` : ''}
   (function () {
@@ -166,10 +170,10 @@ function Juntos() {
       toPage('__juntosAuthResult', { identityToken: c.identityToken, givenName: c.fullName && c.fullName.givenName, familyName: c.fullName && c.fullName.familyName });
     } catch (e) { toPage('__juntosAuthResult', e && e.code === 'ERR_REQUEST_CANCELED' ? { cancel: true } : { error: 'No se pudo iniciar sesión con Apple.' }); }
   };
-  // ---- Google Play: suscripción Juntos Plus ----
+  // ---- Google Play / App Store: suscripción Juntos Plus ----
   const iapReady = useRef(null), iapProducts = useRef({}), iapPurchases = useRef(new Map());
   const iapConnect = () => {
-    if (!IAP) return Promise.reject(new Error('Google Play no está disponible.'));
+    if (!IAP) return Promise.reject(new Error(STORE + ' no está disponible.'));
     if (!iapReady.current) iapReady.current = IAP.initConnection().catch((e) => { iapReady.current = null; throw e; });
     return iapReady.current;
   };
@@ -180,7 +184,7 @@ function Juntos() {
   };
   const playError = (e, fallback) => {
     const cancelled = !!(IAP && IAP.isUserCancelledError && IAP.isUserCancelledError(e));
-    dbgNativo('google play: ' + (e && (e.code || e.message)));
+    dbgNativo('tienda: ' + (e && (e.code || e.message)));
     toPage('__juntosPlayError', { cancelled, message: cancelled ? '' : fallback });
   };
   const playProduct = async (productId) => {
@@ -194,38 +198,57 @@ function Juntos() {
   const playPrice = async (productId) => {
     try {
       const p = await playProduct(productId);
-      const offer = p && (p.subscriptionOffers || []).find((o) => o.offerTokenAndroid);
+      const offer = p && !IOS && (p.subscriptionOffers || []).find((o) => o.offerTokenAndroid);
       toPage('__juntosPlayProducts', p ? [{ id: p.id, price: (offer && offer.displayPrice) || p.displayPrice }] : []);
     } catch (e) { dbgNativo('google play precio: ' + (e && e.message)); }
   };
   const playBuy = async (productId, accountId) => {
     try {
       const p = await playProduct(productId);
-      if (!p) throw new Error('La suscripción todavía no está disponible en Google Play.');
+      if (!p) throw new Error('La suscripción todavía no está disponible en ' + STORE + '.');
+      if (IOS) {
+        // appAccountToken: identificador de la cuenta de Juntos (formato UUID, lo da el servidor) → Apple lo guarda en la compra
+        const tok = /^[0-9a-f-]{36}$/i.test(String(accountId || '')) ? String(accountId) : null;
+        await IAP.requestPurchase({ type: 'subs', request: { apple: { sku: productId, appAccountToken: tok } } });
+        return;
+      }
       const offer = (p.subscriptionOffers || []).find((o) => o.offerTokenAndroid);
       await IAP.requestPurchase({ type: 'subs', request: { google: {
         skus: [productId],
         subscriptionOffers: offer ? [{ sku: productId, offerToken: offer.offerTokenAndroid }] : [],
         obfuscatedAccountId: accountId ? String(accountId) : null // así Google dice de qué cuenta de Juntos es la compra
       } } });
-    } catch (e) { playError(e, (e && /disponible/.test(e.message || '') && e.message) || 'No se pudo abrir el pago de Google Play.'); }
+    } catch (e) { playError(e, (e && /disponible/.test(e.message || '') && e.message) || 'No se pudo abrir el pago de ' + STORE + '.'); }
   };
-  const playRestore = async () => {
-    try { await iapConnect(); (await IAP.getAvailablePurchases() || []).forEach((p) => playToPage(p, true)); }
-    catch (e) { dbgNativo('google play compras: ' + (e && e.message)); }
+  const playRestore = async (manual) => {
+    try {
+      await iapConnect();
+      if (manual && IOS && IAP.restorePurchases) await IAP.restorePurchases().catch(() => {}); // "Restaurar compras": vuelve a pedirlas a Apple
+      const list = (await IAP.getAvailablePurchases() || []).filter((p) => !p.productId || p.productId === 'juntos_plus');
+      list.forEach((p) => playToPage(p, true));
+      if (manual && !list.length) toPage('__juntosPlayError', { message: 'No encontramos una suscripción de Juntos Plus en tu cuenta de ' + STORE + '.' });
+    } catch (e) {
+      dbgNativo('tienda compras: ' + (e && e.message));
+      if (manual) toPage('__juntosPlayError', { message: 'No se pudieron revisar tus compras. Intenta de nuevo.' });
+    }
   };
   const playFinish = (token) => {
     const p = iapPurchases.current.get(token);
     if (p) IAP.finishTransaction({ purchase: p, isConsumable: false }).catch(() => {}); // el servidor ya la confirmó con Google
   };
   const playManage = (productId) => {
+    if (IOS) {
+      const u = 'https://apps.apple.com/account/subscriptions';
+      (IAP && IAP.deepLinkToSubscriptions ? IAP.deepLinkToSubscriptions({}) : Promise.reject()).catch(() => Linking.openURL(u).catch(() => {}));
+      return;
+    }
     const url = 'https://play.google.com/store/account/subscriptions?sku=' + encodeURIComponent(productId) + '&package=' + PLAY_PACKAGE;
     (IAP ? IAP.deepLinkToSubscriptions({ skuAndroid: productId, packageNameAndroid: PLAY_PACKAGE }) : Promise.reject()).catch(() => Linking.openURL(url).catch(() => {}));
   };
   useEffect(() => {
     if (!IAP) return undefined;
     const s1 = IAP.purchaseUpdatedListener((p) => playToPage(p, false));
-    const s2 = IAP.purchaseErrorListener((e) => playError(e, 'No se pudo completar la compra en Google Play.'));
+    const s2 = IAP.purchaseErrorListener((e) => playError(e, 'No se pudo completar la compra en ' + STORE + '.'));
     return () => { try { s1.remove(); s2.remove(); } catch { /* */ } IAP.endConnection().catch(() => {}); };
   }, []);
   const adShow = !!(ad && ad.visible && ad.rect && !full);
@@ -307,7 +330,7 @@ function Juntos() {
     else if (m && m.type === 'auth-apple') authApple();
     else if (m && m.type === 'play-products') playPrice(String(m.productId || 'juntos_plus'));
     else if (m && m.type === 'play-buy') playBuy(String(m.productId || 'juntos_plus'), m.accountId);
-    else if (m && m.type === 'play-restore') playRestore();
+    else if (m && m.type === 'play-restore') playRestore(!!m.manual);
     else if (m && m.type === 'play-finish') playFinish(String(m.purchaseToken || ''));
     else if (m && m.type === 'play-manage') playManage(String(m.productId || 'juntos_plus'));
   };
