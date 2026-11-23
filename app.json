@@ -31,10 +31,10 @@
       [
         "expo-splash-screen",
         {
-          "image": "./assets/icon.png",
-          "imageWidth": 120,
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 140,
           "resizeMode": "contain",
-          "backgroundColor": "#0d0f14"
+          "backgroundColor": "#08101d"
         }
       ],
       [
@@ -67,8 +67,8 @@
       "package": "com.appr.juntos",
       "versionCode": 8,
       "adaptiveIcon": {
-        "foregroundImage": "./assets/icon.png",
-        "backgroundColor": "#0d0f14"
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0c1830"
       },
       "permissions": [
         "android.permission.RECORD_AUDIO",
