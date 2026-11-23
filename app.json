@@ -2,7 +2,7 @@
   "expo": {
     "name": "Juntos",
     "slug": "juntos",
-    "version": "1.4.0",
+    "version": "1.4.1",
     "orientation": "default",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
@@ -23,7 +23,8 @@
         "NSAppTransportSecurity": {
           "NSAllowsLocalNetworking": true
         }
-      }
+      },
+      "usesAppleSignIn": true
     },
     "plugins": [
       "expo-status-bar",
@@ -64,7 +65,7 @@
     },
     "android": {
       "package": "com.appr.juntos",
-      "versionCode": 7,
+      "versionCode": 8,
       "adaptiveIcon": {
         "foregroundImage": "./assets/icon.png",
         "backgroundColor": "#0d0f14"

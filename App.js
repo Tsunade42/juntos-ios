@@ -44,7 +44,10 @@ const APP_TAG = Platform.OS === 'android' ? 'JuntosAndroid/1.1' : 'JuntosiOS/1.0
 
 // Sonido de la app: suena aunque el iPhone esté en silencio, sigue en segundo plano y sale por la bocina
 // (no por el auricular de llamadas) también cuando el micrófono está activo.
-setAudioModeAsync({ playsInSilentMode: true, shouldPlayInBackground: true, allowsRecording: true, shouldRouteThroughEarpiece: false, interruptionMode: 'mixWithOthers' }).catch(() => {});
+// Solo iPhone. En Android, expo-audio llama setSpeakerphoneOn() y la app queda registrada como "llamada": desde
+// Android 12, cada vez que un video empieza o se detiene el sistema vuelve a enrutar TODO el audio, el reloj del video
+// se atora y YouTube se pausa solo (cortes cada segundo). Android no necesita nada de esto.
+if (Platform.OS === 'ios') setAudioModeAsync({ playsInSilentMode: true, shouldPlayInBackground: true, allowsRecording: true, shouldRouteThroughEarpiece: false, interruptionMode: 'mixWithOthers' }).catch(() => {});
 
 // Diagnóstico: anota cargas de página y cambios de estado de la app (el servidor solo lo guarda si está encendido).
 const dbgNativo = (m) => { fetch(SERVER + '/api/dbg', { method: 'POST', body: JSON.stringify({ m: '[nativo] ' + m }) }).catch(() => {}); };
