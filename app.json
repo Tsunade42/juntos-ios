@@ -49,7 +49,8 @@
         "react-native-google-mobile-ads",
         {
           "androidAppId": "ca-app-pub-7258575032949973~6999733512",
-          "iosAppId": "ca-app-pub-3940256099942544~1458002511"
+          "iosAppId": "ca-app-pub-7258575032949973~4342916056",
+          "userTrackingUsageDescription": "Juntos usa este permiso para mostrarte anuncios más relevantes. Si no lo permites, verás anuncios igual, pero no personalizados."
         }
       ],
       "expo-iap",
@@ -57,6 +58,12 @@
         "expo-navigation-bar",
         {
           "enforceContrast": false
+        }
+      ],
+      [
+        "expo-tracking-transparency",
+        {
+          "userTrackingPermission": "Juntos usa este permiso para mostrarte anuncios más relevantes. Si no lo permites, verás anuncios igual, pero no personalizados."
         }
       ]
     ],

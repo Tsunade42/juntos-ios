@@ -16,7 +16,10 @@ import { Dimensions } from 'react-native';
 const PHONE = Math.min(Dimensions.get('screen').width, Dimensions.get('screen').height) < 600;
 const O = ScreenOrientation.OrientationLock;
 // Anuncios (AdMob): por ahora solo en Android. En iPhone la librería ni se carga.
-const Ads = Platform.OS === 'android' ? (() => { try { return require('react-native-google-mobile-ads'); } catch { return null; } })() : null;
+// Anuncios (AdMob) en Android y iPhone. En iPhone primero se pregunta el permiso de rastreo de Apple (App Tracking
+// Transparency); si la persona dice que no, los anuncios salen igual pero sin personalizar.
+const Ads = (() => { try { return require('react-native-google-mobile-ads'); } catch { return null; } })();
+let adsPersonal = false; // Android: sin personalizar, como siempre; iPhone: personalizados solo si la persona lo permite
 // Juntos Plus con Google Play (solo Android). La compra la hace Google; el servidor la confirma con la API de Google Play.
 const IAP = Platform.OS === 'android' ? (() => { try { return require('expo-iap'); } catch { return null; } })() : null;
 const PLAY_PACKAGE = 'com.appr.juntos';
@@ -62,7 +65,7 @@ const START_URL = SERVER + (E2E_RUTA && /^[\w-]+$/.test(String(E2E_RUTA)) ? '/r/
 const BEFORE = `
   window.juntosIOS = true;
   window.juntosNav = 1; // esta versión trae navegador integrado (YouTube completo, servicios y páginas dentro de la sala)
-  window.juntosAds = ${Ads ? 1 : 0}; // la app puede mostrar un banner pequeño en las listas (solo Android)
+  window.juntosAds = ${Ads ? 1 : 0}; // la app puede mostrar anuncios (banner en las listas y video al crear sala)
   window.juntosPlay = ${IAP ? 1 : 0}; // Juntos Plus se paga con Google Play (solo Android)
   ${E2E_SERVIDOR ? 'window.juntosE2E = true;' : ''}
   ${E2E_TOKEN ? `try { localStorage.setItem('juntos-token', ${JSON.stringify(String(E2E_TOKEN))}); } catch (e) {}` : ''}
@@ -134,7 +137,7 @@ function Juntos() {
     let earned = false, finished = false;
     const finish = (v) => { if (finished) return; finished = true; toPage('__juntosRewarded', v); };
     try {
-      const ad2 = Ads.RewardedAd.createForAdRequest((adCfg && adCfg.rewarded) || Ads.TestIds.REWARDED, { requestNonPersonalizedAdsOnly: true });
+      const ad2 = Ads.RewardedAd.createForAdRequest((adCfg && adCfg.rewarded) || Ads.TestIds.REWARDED, { requestNonPersonalizedAdsOnly: !adsPersonal });
       const subs = [];
       const off = () => subs.forEach((u) => { try { u(); } catch { /* */ } });
       subs.push(ad2.addAdEventListener(Ads.RewardedAdEventType.LOADED, () => { dbgNativo('anuncio de video: cargó'); ad2.show().catch(() => { off(); finish({ error: 'no se pudo mostrar' }); }); }));
@@ -229,8 +232,17 @@ function Juntos() {
   const adRect = (ad && ad.rect) || { x: 0, y: 0, w: 360, h: 58 };
   useEffect(() => {
     if (!Ads) return;
-    Ads.default().initialize().catch(() => {});
-    fetch(SERVER + '/api/anuncios?real=1', { cache: 'no-store' }).then((r) => r.json()).then((j) => setAdCfg((j && j.android) || null)).catch(() => {});
+    (async () => {
+      if (Platform.OS === 'ios') {
+        try {
+          const ATT = require('expo-tracking-transparency');
+          const r = await ATT.requestTrackingPermissionsAsync();
+          adsPersonal = !!(r && r.granted);
+        } catch { adsPersonal = false; }
+      }
+      Ads.default().initialize().catch(() => {});
+      fetch(SERVER + '/api/anuncios?real=1', { cache: 'no-store' }).then((r) => r.json()).then((j) => setAdCfg((j && j[Platform.OS === 'ios' ? 'ios' : 'android']) || null)).catch(() => {});
+    })();
   }, []);
   const web = useRef(null);
   // Navegador integrado: una vista web real colocada justo encima del hueco del video de la sala.
@@ -440,7 +452,7 @@ function Juntos() {
             key={adKey}
             unitId={adCfg.banner || Ads.TestIds.BANNER}
             size={Ads.BannerAdSize.BANNER}
-            requestOptions={{ requestNonPersonalizedAdsOnly: true }}
+            requestOptions={{ requestNonPersonalizedAdsOnly: !adsPersonal }}
             onAdLoaded={() => { dbgNativo('anuncio: cargó'); tellAd(true); }}
             onAdFailedToLoad={(e) => {
               dbgNativo('anuncio: no cargó ' + (e && (e.code || e.message)));
